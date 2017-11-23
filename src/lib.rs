@@ -6,9 +6,9 @@ use std::str::FromStr;
 use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
 
-use futures::future::Future;
+use futures::future::{Future, ok};
 
-use hyper::StatusCode;
+use hyper::{Uri, Method, Headers, HttpVersion, Body, StatusCode, Error};
 use hyper::server::Service;
 use hyper::server::Request as HyperRequest;
 use hyper::server::Response;
@@ -43,11 +43,11 @@ impl Request {
 		}
 	}
 
-	pub fn deconstruct(self) -> (::hyper::Method, ::hyper::Uri, ::hyper::HttpVersion, ::hyper::Headers, ::hyper::Body) {
+	pub fn deconstruct(self) -> (Method, Uri, HttpVersion, Headers, Body) {
 		self.inner.deconstruct()
 	}
 
-	pub fn body(self) -> ::hyper::Body {
+	pub fn body(self) -> Body {
 		self.inner.body()
 	}
 
@@ -57,7 +57,7 @@ impl Request {
 }
 
 pub struct Router {
-	router: RecognizerRouter<Box<Service<Request = Request, Response = Response, Error = hyper::Error, Future = Box<Future<Item = Response, Error = hyper::Error>>>>>,
+	router: RecognizerRouter<Box<Service<Request = Request, Response = Response, Error = Error, Future = Box<Future<Item = Response, Error = Error>>>>>,
 	subrouters: HashMap<String, Router>,
 }
 
@@ -70,7 +70,7 @@ impl Router {
 	}
 
 	pub fn add<T>(&mut self, route: &str, service: T)
-		where T: 'static + Service<Request = Request, Response = Response, Error = hyper::Error, Future = Box<Future<Item = Response, Error = hyper::Error>>>
+		where T: 'static + Service<Request = Request, Response = Response, Error = Error, Future = Box<Future<Item = Response, Error = Error>>>
 	{
 		self.router.add(route, Box::new(service));
 	}
@@ -84,44 +84,42 @@ impl Router {
 impl Service for Router {
 	type Request = HyperRequest;
 	type Response = Response;
-	type Error = hyper::Error;
-	type Future = Box<Future<Item = Response, Error = hyper::Error>>;
+	type Error = Error;
+	type Future = Box<Future<Item = Response, Error = Error>>;
 
 	fn call(&self, mut req: HyperRequest) -> Self::Future {
 		match self.router.recognize(req.path()) {
 			Ok(service) => service.handler.call(Request::new(req, service.params)),
 			Err(_) => {
-				let u = req.uri().to_owned();
-				let p = u.path().to_owned();
+				let path = req.uri().path().to_owned();
 				let mut found = None;
 				for prefix in self.subrouters.keys() {
-					if p.starts_with(prefix) {
+					if path.starts_with(prefix) {
+						// stop on first find.
 						found = Some(prefix);
-						println!("{:?}", found);
+						break;
 					}
 				}
 
 				match found {
 					Some(found) => {
-						let new_path = match p.trim_left_matches(found) {
+
+						let new_path = match path.trim_left_matches(found) {
 							"" => "/",
-							p => p
+							path => path
 						};
-						let uu = ::hyper::Uri::from_str(&new_path);
-						let uuu = match uu {
-							Ok(uu) => uu,
+
+						let new_uri = match Uri::from_str(&new_path) {
+							Ok(uri) => uri,
 							Err(e) => panic!("{:?}", e),
 						};
-						println!("{:?}", found);
-						req.set_uri(uuu);
-						let s = &self.subrouters[found];
-						s.call(req)
+
+						req.set_uri(new_uri);
+
+						let subrouter = &self.subrouters[found];
+						subrouter.call(req)
 					}
-					None => {
-						Box::new(futures::future::ok(
-						Response::new()
-							.with_status(StatusCode::NotFound)))
-					}
+					None => Box::new(ok(Response::new().with_status(StatusCode::NotFound)))
 				}
 			}
 		}
