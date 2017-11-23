@@ -4,6 +4,7 @@ extern crate futures;
 
 use std::str::FromStr;
 use std::collections::HashMap;
+use std::ops::{Deref, DerefMut};
 
 use futures::future::Future;
 
@@ -20,6 +21,20 @@ pub struct Request {
 	params: Params,
 }
 
+impl Deref for Request {
+	type Target = HyperRequest;
+
+	fn deref(&self) -> &Self::Target {
+		&self.inner
+	}
+}
+
+impl DerefMut for Request {
+	fn deref_mut(&mut self) -> &mut Self::Target {
+		&mut self.inner
+	}
+}
+
 impl Request {
 	fn new(hyper_req: HyperRequest, params: Params) -> Request {
 		Request {
@@ -28,48 +43,12 @@ impl Request {
 		}
 	}
 
-	pub fn uri(&self) -> &::hyper::Uri {
-		self.inner.uri()
-	}
-
-	pub fn version(&self) -> ::hyper::HttpVersion {
-		self.inner.version()
-	}
-
-	pub fn headers(&self) -> &::hyper::Headers {
-		self.inner.headers()
-	}
-
-	pub fn method(&self) -> &::hyper::Method {
-		self.inner.method()
-	}
-
-	pub fn body_ref(&self) -> Option<&::hyper::Body> {
-		self.inner.body_ref()
-	}
-
-	pub fn remote_addr(&self) -> Option<::std::net::SocketAddr> {
-		self.inner.remote_addr()
-	}
-
-	pub fn path(&self) -> &str {
-		self.inner.path()
-	}
-
-	pub fn query(&self) -> Option<&str> {
-		self.inner.query()
-	}
-
 	pub fn deconstruct(self) -> (::hyper::Method, ::hyper::Uri, ::hyper::HttpVersion, ::hyper::Headers, ::hyper::Body) {
 		self.inner.deconstruct()
 	}
 
 	pub fn body(self) -> ::hyper::Body {
 		self.inner.body()
-	}
-
-	pub fn set_uri(&mut self, uri: ::hyper::Uri) {
-		self.inner.set_uri(uri);
 	}
 
 	pub fn params(&self) -> &Params {
