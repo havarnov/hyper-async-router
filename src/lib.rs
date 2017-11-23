@@ -14,7 +14,7 @@ use hyper::server::Request as HyperRequest;
 use hyper::server::Response;
 
 use route_recognizer::Router as RecognizerRouter;
-use route_recognizer::Params;
+pub use route_recognizer::Params;
 
 pub struct Request {
 	inner: HyperRequest,
