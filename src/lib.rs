@@ -1,63 +1,26 @@
 extern crate hyper;
+extern crate http;
 extern crate route_recognizer;
 extern crate futures;
 
 use std::str::FromStr;
 use std::collections::HashMap;
-use std::ops::{Deref, DerefMut};
 
 use futures::future::{Future, ok};
 
-use hyper::{Uri, Method, Headers, HttpVersion, Body, StatusCode, Error};
+use hyper::{Uri, Body, StatusCode, Error};
 use hyper::server::Service;
 use hyper::server::Request as HyperRequest;
 use hyper::server::Response;
 
+use http::Request as HttpRequest;
+use http::Response as HttpResponse;
+
 use route_recognizer::Router as RecognizerRouter;
 pub use route_recognizer::Params;
 
-pub struct Request {
-	inner: HyperRequest,
-	params: Params,
-}
-
-impl Deref for Request {
-	type Target = HyperRequest;
-
-	fn deref(&self) -> &Self::Target {
-		&self.inner
-	}
-}
-
-impl DerefMut for Request {
-	fn deref_mut(&mut self) -> &mut Self::Target {
-		&mut self.inner
-	}
-}
-
-impl Request {
-	fn new(hyper_req: HyperRequest, params: Params) -> Request {
-		Request {
-			inner: hyper_req,
-			params: params,
-		}
-	}
-
-	pub fn deconstruct(self) -> (Method, Uri, HttpVersion, Headers, Body) {
-		self.inner.deconstruct()
-	}
-
-	pub fn body(self) -> Body {
-		self.inner.body()
-	}
-
-	pub fn params(&self) -> &Params {
-		&self.params
-	}
-}
-
 pub struct Router {
-	router: RecognizerRouter<Box<Service<Request = Request, Response = Response, Error = Error, Future = Box<Future<Item = Response, Error = Error>>>>>,
+	router: RecognizerRouter<Box<Service<Request = HttpRequest<Body>, Response = HttpResponse<Body>, Error = Error, Future = Box<Future<Item = HttpResponse<Body>, Error = Error>>>>>,
 	subrouters: HashMap<String, Router>,
 }
 
@@ -70,7 +33,7 @@ impl Router {
 	}
 
 	pub fn add<T>(&mut self, route: &str, service: T)
-		where T: 'static + Service<Request = Request, Response = Response, Error = Error, Future = Box<Future<Item = Response, Error = Error>>>
+		where T: 'static + Service<Request = HttpRequest<Body>, Response = HttpResponse<Body>, Error = Error, Future = Box<Future<Item = HttpResponse<Body>, Error = Error>>>
 	{
 		self.router.add(route, Box::new(service));
 	}
@@ -89,7 +52,11 @@ impl Service for Router {
 
 	fn call(&self, mut req: HyperRequest) -> Self::Future {
 		match self.router.recognize(req.path()) {
-			Ok(service) => service.handler.call(Request::new(req, service.params)),
+			Ok(service) => {
+				let mut request: HttpRequest<Body> = HttpRequest::from(req);
+				request.extensions_mut().insert(service.params);
+				Box::new(service.handler.call(request).map(|r| Response::from(r)))
+			},
 			Err(_) => {
 				let path = req.uri().path().to_owned();
 				let mut found = None;
@@ -117,7 +84,7 @@ impl Service for Router {
 						req.set_uri(new_uri);
 
 						let subrouter = &self.subrouters[found];
-						subrouter.call(req)
+						Box::new(subrouter.call(req).map(|r| Response::from(r)))
 					}
 					None => Box::new(ok(Response::new().with_status(StatusCode::NotFound)))
 				}

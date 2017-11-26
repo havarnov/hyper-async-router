@@ -1,21 +1,21 @@
 extern crate hyper;
-extern crate route_recognizer;
+extern crate http;
 extern crate futures;
 extern crate hyper_async_router;
 extern crate tokio_service;
 
 use std::marker::PhantomData;
 
-// use futures::future::FutureResult;
 use futures::future::Future;
 use futures::{IntoFuture};
 
-// use hyper::{Get, Post, StatusCode};
-use hyper::header::ContentLength;
-use hyper::server::{Http, Service, Request, Response};
+use hyper::Body;
+use hyper::server::{Http, Service};
 
-use hyper_async_router::Router;
-use hyper_async_router::Request as RouterRequest;
+use http::Request as HttpRequest;
+use http::Response as HttpResponse;
+
+use hyper_async_router::{Router, Params};
 
 /// A service implemented by a closure.
 pub struct ServiceFn<F, R> {
@@ -48,43 +48,46 @@ pub fn service_fn<F, R, S>(f: F) -> ServiceFn<F, R>
     }
 }
 
-static TEXT: &'static str = "Hello, World!";
-
-fn index(req: RouterRequest) -> Box<Future<Item = Response, Error = hyper::Error>> {
-    Box::new(futures::future::ok(
-        Response::new()
-            .with_header(ContentLength(TEXT.len() as u64))
-            .with_body(TEXT)))
+fn index(_: HttpRequest<Body>) -> Box<Future<Item = HttpResponse<Body>, Error = hyper::Error>>
+{
+    let body = Body::from("index".to_string());
+    let mut response = HttpResponse::new(body);
+    *response.status_mut() = ::http::StatusCode::OK;
+    Box::new(futures::future::ok(response))
 }
 
-fn index2(req: RouterRequest) -> Box<Future<Item = Response, Error = hyper::Error>> {
-    Box::new(futures::future::ok(
-        Response::new()
-            .with_header(ContentLength("index2".len() as u64))
-            .with_body("index2")))
+fn users(_: HttpRequest<Body>) -> Box<Future<Item = HttpResponse<Body>, Error = hyper::Error>>
+{
+    let body = Body::from("users".to_string());
+    let mut response = HttpResponse::new(body);
+    *response.status_mut() = ::http::StatusCode::OK;
+    Box::new(futures::future::ok(response))
 }
 
-fn index3(req: RouterRequest) -> Box<Future<Item = Response, Error = hyper::Error>> {
-    Box::new(futures::future::ok(
-        Response::new()
-            .with_header(ContentLength("index3".len() as u64))
-            .with_body("index3")))
+fn user(req: HttpRequest<Body>) -> Box<Future<Item = HttpResponse<Body>, Error = hyper::Error>>
+{
+    let params = req.extensions().get::<Params>().unwrap();
+    let body = Body::from(format!("user: {:?}", params));
+    let mut response = HttpResponse::new(body);
+    *response.status_mut() = ::http::StatusCode::OK;
+    Box::new(futures::future::ok(response))
 }
 
-fn index4(req: RouterRequest) -> Box<Future<Item = Response, Error = hyper::Error>> {
-    let t = format!("index4: {:?}", req.params());
-    Box::new(futures::future::ok(
-        Response::new()
-            .with_header(ContentLength(t.len() as u64))
-            .with_body(t)))
+fn sub(_: HttpRequest<Body>) -> Box<Future<Item = HttpResponse<Body>, Error = hyper::Error>>
+{
+    let body = Body::from("sub".to_string());
+    let mut response = HttpResponse::new(body);
+    *response.status_mut() = ::http::StatusCode::OK;
+    Box::new(futures::future::ok(response))
 }
 
-fn user(req: RouterRequest) -> Box<Future<Item = Response, Error = hyper::Error>> {
-    let msg = "HELLO USER!";
-    Box::new(futures::future::ok(
-        Response::new()
-            .with_header(ContentLength(msg.len() as u64))
-            .with_body(msg)))
+fn sub_with_params(req: HttpRequest<Body>) -> Box<Future<Item = HttpResponse<Body>, Error = hyper::Error>>
+{
+    let params = req.extensions().get::<Params>().unwrap();
+    let body = Body::from(format!("sub_with_params: {:?}", params));
+    let mut response = HttpResponse::new(body);
+    *response.status_mut() = ::http::StatusCode::OK;
+    Box::new(futures::future::ok(response))
 }
 
 fn main() {
@@ -92,12 +95,13 @@ fn main() {
 
     let server = Http::new().bind(&addr, || {
         let mut subrouter = Router::new();
-        subrouter.add("/", service_fn(index2));
-        subrouter.add("/ind3", service_fn(index3));
-        subrouter.add("/ind3/:id/foobar/:rall", service_fn(index4));
+        subrouter.add("/", service_fn(sub));
+        subrouter.add("/:id/foobar/:bar", service_fn(sub_with_params));
+
         let mut router = Router::new();
         router.add("/", service_fn(index));
-        router.add("/user", service_fn(user));
+        router.add("/users", service_fn(users));
+        router.add("/users/:id", service_fn(user));
         router.add_router("/subrouter", subrouter);
         Ok(router)}).unwrap();
     println!("Listening on http://{} with 1 thread.", server.local_addr().unwrap());
