@@ -19,8 +19,18 @@ use http::Response as HttpResponse;
 use route_recognizer::Router as RecognizerRouter;
 pub use route_recognizer::Params;
 
+enum MethodChecker {
+	All,
+	AnyOf(Vec<::http::Method>),
+}
+
+struct Handler{
+	service: Box<Service<Request = HttpRequest<Body>, Response = HttpResponse<Body>, Error = Error, Future = Box<Future<Item = HttpResponse<Body>, Error = Error>>>>,
+	methods: MethodChecker,
+}
+
 pub struct Router {
-	router: RecognizerRouter<Box<Service<Request = HttpRequest<Body>, Response = HttpResponse<Body>, Error = Error, Future = Box<Future<Item = HttpResponse<Body>, Error = Error>>>>>,
+	router: RecognizerRouter<Handler>,
 	subrouters: HashMap<String, Router>,
 }
 
@@ -32,10 +42,70 @@ impl Router {
 		}
 	}
 
-	pub fn add<T>(&mut self, route: &str, service: T)
+	pub fn any<T>(&mut self, route: &str, service: T)
 		where T: 'static + Service<Request = HttpRequest<Body>, Response = HttpResponse<Body>, Error = Error, Future = Box<Future<Item = HttpResponse<Body>, Error = Error>>>
 	{
-		self.router.add(route, Box::new(service));
+		self.router.add(route, Handler{ service: Box::new(service), methods: MethodChecker::All});
+	}
+
+	pub fn get<T>(&mut self, route: &str, service: T)
+		where T: 'static + Service<Request = HttpRequest<Body>, Response = HttpResponse<Body>, Error = Error, Future = Box<Future<Item = HttpResponse<Body>, Error = Error>>>
+	{
+		self.add_with_methods(route, service, vec![::http::Method::GET]);
+	}
+
+	pub fn post<T>(&mut self, route: &str, service: T)
+		where T: 'static + Service<Request = HttpRequest<Body>, Response = HttpResponse<Body>, Error = Error, Future = Box<Future<Item = HttpResponse<Body>, Error = Error>>>
+	{
+		self.add_with_methods(route, service, vec![::http::Method::POST]);
+	}
+
+	pub fn put<T>(&mut self, route: &str, service: T)
+		where T: 'static + Service<Request = HttpRequest<Body>, Response = HttpResponse<Body>, Error = Error, Future = Box<Future<Item = HttpResponse<Body>, Error = Error>>>
+	{
+		self.add_with_methods(route, service, vec![::http::Method::PUT]);
+	}
+
+	pub fn options<T>(&mut self, route: &str, service: T)
+		where T: 'static + Service<Request = HttpRequest<Body>, Response = HttpResponse<Body>, Error = Error, Future = Box<Future<Item = HttpResponse<Body>, Error = Error>>>
+	{
+		self.add_with_methods(route, service, vec![::http::Method::OPTIONS]);
+	}
+
+	pub fn head<T>(&mut self, route: &str, service: T)
+		where T: 'static + Service<Request = HttpRequest<Body>, Response = HttpResponse<Body>, Error = Error, Future = Box<Future<Item = HttpResponse<Body>, Error = Error>>>
+	{
+		self.add_with_methods(route, service, vec![::http::Method::HEAD]);
+	}
+
+	pub fn delete<T>(&mut self, route: &str, service: T)
+		where T: 'static + Service<Request = HttpRequest<Body>, Response = HttpResponse<Body>, Error = Error, Future = Box<Future<Item = HttpResponse<Body>, Error = Error>>>
+	{
+		self.add_with_methods(route, service, vec![::http::Method::DELETE]);
+	}
+
+	pub fn connect<T>(&mut self, route: &str, service: T)
+		where T: 'static + Service<Request = HttpRequest<Body>, Response = HttpResponse<Body>, Error = Error, Future = Box<Future<Item = HttpResponse<Body>, Error = Error>>>
+	{
+		self.add_with_methods(route, service, vec![::http::Method::CONNECT]);
+	}
+
+	pub fn patch<T>(&mut self, route: &str, service: T)
+		where T: 'static + Service<Request = HttpRequest<Body>, Response = HttpResponse<Body>, Error = Error, Future = Box<Future<Item = HttpResponse<Body>, Error = Error>>>
+	{
+		self.add_with_methods(route, service, vec![::http::Method::PATCH]);
+	}
+
+	pub fn trace<T>(&mut self, route: &str, service: T)
+		where T: 'static + Service<Request = HttpRequest<Body>, Response = HttpResponse<Body>, Error = Error, Future = Box<Future<Item = HttpResponse<Body>, Error = Error>>>
+	{
+		self.add_with_methods(route, service, vec![::http::Method::TRACE]);
+	}
+
+	pub fn add_with_methods<T>(&mut self, route: &str, service: T, methods: Vec<::http::Method>)
+		where T: 'static + Service<Request = HttpRequest<Body>, Response = HttpResponse<Body>, Error = Error, Future = Box<Future<Item = HttpResponse<Body>, Error = Error>>>
+	{
+		self.router.add(route, Handler{ service: Box::new(service), methods: MethodChecker::AnyOf(methods)});
 	}
 
 	pub fn add_router(&mut self, route: &str, subrouter: Router)
@@ -52,10 +122,21 @@ impl Service for Router {
 
 	fn call(&self, mut req: HyperRequest) -> Self::Future {
 		match self.router.recognize(req.path()) {
-			Ok(service) => {
+			Ok(matched) => {
 				let mut request: HttpRequest<Body> = HttpRequest::from(req);
-				request.extensions_mut().insert(service.params);
-				Box::new(service.handler.call(request).map(|r| Response::from(r)))
+				use MethodChecker::*;
+				let matched_method = match matched.handler.methods {
+					All => true,
+					AnyOf(ref methods) => methods.contains(request.method())
+				};
+
+				if matched_method {
+					request.extensions_mut().insert(matched.params);
+					Box::new(matched.handler.service.call(request).map(|r| Response::from(r)))
+				} else {
+					Box::new(ok(Response::new().with_status(StatusCode::MethodNotAllowed)))
+				}
+
 			},
 			Err(_) => {
 				let path = req.uri().path().to_owned();

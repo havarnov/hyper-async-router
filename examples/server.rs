@@ -95,13 +95,13 @@ fn main() {
 
     let server = Http::new().bind(&addr, || {
         let mut subrouter = Router::new();
-        subrouter.add("/", service_fn(sub));
-        subrouter.add("/:id/foobar/:bar", service_fn(sub_with_params));
+        subrouter.get("/", service_fn(sub));
+        subrouter.get("/:id/foobar/:bar", service_fn(sub_with_params));
 
         let mut router = Router::new();
-        router.add("/", service_fn(index));
-        router.add("/users", service_fn(users));
-        router.add("/users/:id", service_fn(user));
+        router.get("/", service_fn(index));
+        router.get("/users", service_fn(users));
+        router.get("/users/:id", service_fn(user));
         router.add_router("/subrouter", subrouter);
         Ok(router)}).unwrap();
     println!("Listening on http://{} with 1 thread.", server.local_addr().unwrap());
